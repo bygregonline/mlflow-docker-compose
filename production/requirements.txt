@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+mlflow
+boto3
+scikit-learn
+xgboost
+numpy
+py-common-fetch
+python-multipart
+pytz

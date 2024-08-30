@@ -1,0 +1,142 @@
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres-container
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}||
+    volumes:
+      - mlflow-posgresql-data:/var/lib/postgresql/data
+    networks:
+      mlflow_network:
+        ipv4_address: 172.16.0.20
+
+
+  nginx:
+    image: bygreg/mlflow-nginx:v1
+    container_name: nginx-container
+    ports:
+      - "9880:9880"
+    environment:
+      BASIC_AUTH_USERNAME: ${BASIC_AUTH_USERNAME}
+      BASIC_AUTH_PASSWORD: ${BASIC_AUTH_PASSWORD}
+    depends_on:
+      - mlflow
+    volumes:
+      - mlflow-nginx-data-log:/var/log/production/nginx/
+    command: /entrypoint.sh
+    networks:
+      mlflow_network:
+        ipv4_address: 172.16.0.30
+
+  minio:
+    image: bygreg/mlflow-minio:v1
+    container_name: minio-container
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_WEB_UI_PORT: ${MINIO_WEB_UI_PORT}
+    # command: server /data
+    command: /app/entrypoint.sh
+    volumes:
+      - mlflow-minio-data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+      - "46455:46455"
+    networks:
+      mlflow_network:
+        ipv4_address: 172.16.0.40
+
+
+  simple:
+      image: bygreg/mlflow-simple:v1
+      container_name: simple-container
+      command: sleep infinity
+      volumes:
+          - mlflow-data-logs:/root/mlflow-logs
+          - mlflow-posgresql-data:/root/postgresql
+          - mlflow-minio-data:/root/minio
+          - mlflow-nginx-data-log:/root/nginx
+          - mlflow-production-data-logs:/root/production
+          - mlflow-production-models:/root/production-models
+      networks:
+        mlflow_network:
+          ipv4_address: 172.16.0.60
+
+
+  mlflow:
+    image: bygreg/mlflow-mlflow:v1
+    container_name: mlflow-container
+    environment:
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_DB_URI}
+      ARTIFACT_ROOT: ${MLFLOW_S3_MINIO_BUCKET}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_URL}
+
+      MLFLOW_PORT : ${MLFLOW_PORT}
+    # entrypoint:
+    #   mlflow server --backend-store-uri $MLFLOW_TRACKING_URI --default-artifact-root $ARTIFACT_ROOT --host 0.0.0.0 --port 5000
+    volumes:
+      - mlflow-data-logs:/app
+    depends_on:
+      - postgres
+      - minio
+    command: >
+      mlflow server --host 0.0.0.0 --port ${MLFLOW_PORT} --default-artifact-root ${MLFLOW_S3_MINIO_BUCKET}
+    networks:
+      mlflow_network:
+        ipv4_address: 172.16.0.70
+
+
+  production:
+    image: bygreg/mlflow-production:v1
+    container_name: prod-container
+    ports:
+      - "8000:8000"
+    environment:
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_DOCKER_URI}
+      MLFLOW_MODEL_URI: ${MLFLOW_MODEL_URI}
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      MLFLOW_S3_ENDPOINT_URL: ${MLFLOW_S3_ENDPOINT_DOCKER_URL}
+    depends_on:
+      - mlflow
+    volumes:
+      - mlflow-production-data-logs:/var/log/production/python/
+      - mlflow-production-models:/app/models
+    command: /app/entrypoint.sh
+    networks:
+      mlflow_network:
+        ipv4_address: 172.16.0.80
+
+
+
+volumes:
+  mlflow-posgresql-data:
+    external: true
+
+  mlflow-minio-data:
+    external: true
+
+  mlflow-data-logs:
+    external: true
+
+  mlflow-nginx-data-log:
+    external: true
+
+  mlflow-production-data-logs:
+    external: true
+
+  mlflow-production-models:
+    external: true
+
+networks:
+  mlflow_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: "172.16.0.0/16"
